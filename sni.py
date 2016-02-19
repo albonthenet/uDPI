@@ -3,40 +3,42 @@ from struct import *
 import datetime
 import pcapy
 import sys
+#import core.types as types
 
-def main(argv):
+"""TODO
+    -add pcapy library check function
+    -add exceptions where it proceeds .. :)
+    -add methods for get/set in types lib [TO CHECK HOW IT WORKS FIRST!]
+    -separate modules not to look like crap..
+    -use/create some logging tool to log events, no IP traffic, etc
+"""
 
+#classes and variables
+class Packet:
+    def __init__(self, epoch, direction, data):
+        self.epoch = epoch
+        self.direction = direction
+        self.data = data
+
+_flows = {}
+
+#check if root is executing this
+def check_permissions():
+    print "Make sure you are root!"
+
+
+def pick_device():
     #list all devices
     devices = pcapy.findalldevs()
-    print devices
 
-    #ask user to enter device name to sniff
     print "Available devices are :"
     for d in devices :
         print d
 
     dev = raw_input("Enter device name to sniff : ")
 
-    print "Sniffing device " + dev
-
-    '''
-    open device
-    # Arguments here are:
-    #   device
-    #   snaplen (maximum number of bytes to capture _per_packet_)
-    #   promiscious mode (1 for true)
-    #   timeout (in milliseconds)
-    '''
-    cap = pcapy.open_live(dev , 65000 , 1 , 100)
-
-    #start sniffing packets
-    while(1) :
-        try:
-                (header, packet) = cap.next()
-                parse_packet(packet)
-        except socket.timeout:
-                continue
-        #print ('%s: captured %d bytes, truncated to %d bytes' %(datetime.datetime.now(), header.getlen(), header.getcaplen()))
+    print "Sniffing device chosen: " + dev
+    return dev
 
 #Convert a string of 6 characters of ethernet address into a dash separated hex string
 def eth_addr (a) :
@@ -57,16 +59,20 @@ def parse_packet(packet) :
     #Parse IP packets, IP Protocol number = 8
     if eth_protocol == 8 :
         #Parse IP header
-        #take first 20 characters for the ip header
-        ip_header = packet[eth_length:20+eth_length]
-
-        #now unpack them :)
+        #Strip from the ethernet offset + 20 Bytes (IP Header contains 160bit)
+        ip_header = packet[eth_length:(eth_length+20)]
+        
+        #Here we unpack the data into "iph" buffer according to the IP header
+        #fields
+        #https://en.wikipedia.org/wiki/IPv4#Header
+        #https://docs.python.org/2/library/struct.html
         iph = unpack('!BBHHHBBH4s4s' , ip_header)
 
         version_ihl = iph[0]
         version = version_ihl >> 4
         ihl = version_ihl & 0xF
 
+        #For transport offset calculation
         iph_length = ihl * 4
 
         ttl = iph[5]
@@ -90,8 +96,9 @@ def parse_packet(packet) :
             acknowledgement = tcph[3]
             doff_reserved = tcph[4]
             tcph_length = doff_reserved >> 4
+            tcph_flags = tcph[5]
 
-            print 'Source Port : ' + str(source_port) + ' Dest Port : ' + str(dest_port) + ' Sequence Number : ' + str(sequence) + ' Acknowledgement : ' + str(acknowledgement) + ' TCP header length : ' + str(tcph_length)
+            print 'Source Port : ' + str(source_port) + ' Dest Port : ' + str(dest_port) + ' Sequence Number : ' + str(sequence) + 'Acknowledgement : ' + str(acknowledgement) + ' TCP header length :' + str(tcph_length) + ' TCP Flags : ' + str(tcph_flags)
 
             h_size = eth_length + iph_length + tcph_length * 4
             data_size = len(packet) - h_size
@@ -119,13 +126,13 @@ def parse_packet(packet) :
             h_size = eth_length + iph_length + icmph_length
             data_size = len(packet) - h_size
 
-            #get data from the packet
+            #Data layer
             data = packet[h_size:]
 
             print 'Data : ' + data
-	    print 'Data hex: ' + ':'.join(x.encode('hex') for x in data)
+            print 'Data hex: ' + ':'.join(x.encode('hex') for x in data)
             #print 'data es de tipo %s' % type(data)
-	
+
         #UDP packets
         elif protocol == 17 :
             u = iph_length + eth_length
@@ -145,7 +152,7 @@ def parse_packet(packet) :
             h_size = eth_length + iph_length + udph_length
             data_size = len(packet) - h_size
 
-            #get data from the packet
+            #Data layer
             data = packet[h_size:]
             print 'Data : ' + data
 
@@ -155,5 +162,28 @@ def parse_packet(packet) :
 
         print
 
+def main(argv):
+
+    check_permissions()
+    '''
+    open device
+    # Arguments here are:
+    #   device
+    #   snaplen (maximum number of bytes to capture _per_packet_)
+    #   promiscious mode (1 for true)
+    #   timeout (in milliseconds)
+    '''
+    cap = pcapy.open_live(pick_device() , 65000 , 1 , 100)
+
+    #start sniffing packets
+    while(1) :
+        try:
+                (header, packet) = cap.next()
+                parse_packet(packet)
+        except socket.timeout:
+                continue
+        print ('%s: captured %d bytes, truncated to %d bytes' %(datetime.datetime.now(), header.getlen(), header.getcaplen()))
+
+
 if __name__ == "__main__":
-  main(sys.argv)
+    main(sys.argv)
