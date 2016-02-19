@@ -3,7 +3,7 @@ from struct import *
 import datetime
 import pcapy
 import sys
-import core.types as types
+#import core.types as types
 
 """TODO
     -add pcapy library check function
