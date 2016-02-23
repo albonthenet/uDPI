@@ -3,29 +3,24 @@ from struct import *
 import datetime
 import pcapy
 import sys
+
 import core.types as types
+from core.aux import *
 
 """TODO
     -add pcapy library check function
-    -add exceptions where it proceeds .. :)
+    -add non-crypo hash functs
+    -add exceptions where it proceeds 
     -add methods for get/set in types lib [TO CHECK HOW IT WORKS FIRST!]
-    -separate modules not to look like crap..
     -use/create some logging tool to log events, no IP traffic, etc
 """
 
 #classes and variables
-class Packet:
-    def __init__(self, epoch, direction, data):
-        self.epoch = epoch
-        self.direction = direction
-        self.data = data
 
 _flows = {}
 
-#check if root is executing this
-def check_permissions():
-    print "Make sure you are root!"
-
+#Packet_info type declaration example:
+#p1 = types.Packet_info(0.77742, 1, "dddddddd")
 
 def pick_device():
     #list all devices
@@ -45,6 +40,9 @@ def eth_addr (a) :
     b = "%.2x:%.2x:%.2x:%.2x:%.2x:%.2x" % (ord(a[0]) , ord(a[1]) , ord(a[2]), ord(a[3]), ord(a[4]) , ord(a[5]))
     return b
 
+def add_flow(s_addr, d_addr, s_port, d_port) :
+    print "nueva conex capturada"
+
 #function to parse a packet
 def parse_packet(packet) :
 
@@ -54,7 +52,7 @@ def parse_packet(packet) :
     eth_header = packet[:eth_length]
     eth = unpack('!6s6sH' , eth_header)
     eth_protocol = socket.ntohs(eth[2])
-    print 'Destination MAC : ' + eth_addr(packet[0:6]) + ' Source MAC : ' + eth_addr(packet[6:12]) + ' Protocol : ' + str(eth_protocol)
+    #print 'Destination MAC : ' + eth_addr(packet[0:6]) + ' Source MAC : ' + eth_addr(packet[6:12]) + ' Protocol : ' + str(eth_protocol)
 
     #Parse IP packets, IP Protocol number = 8
     if eth_protocol == 8 :
@@ -80,33 +78,43 @@ def parse_packet(packet) :
         s_addr = socket.inet_ntoa(iph[8]);
         d_addr = socket.inet_ntoa(iph[9]);
 
-        print 'Version : ' + str(version) + ' IP Header Length : ' + str(ihl) + ' TTL : ' + str(ttl) + ' Protocol : ' + str(protocol) + ' Source Address : ' + str(s_addr) + ' Destination Address : ' + str(d_addr)
+        #print 'Version : ' + str(version) + ' IP Header Length : ' + str(ihl) + ' TTL : ' + str(ttl) + ' Protocol : ' + str(protocol) + ' Source Address : ' + str(s_addr) + ' Destination Address : ' + str(d_addr)
 
         #TCP protocol
         if protocol == 6 :
             t = iph_length + eth_length
             tcp_header = packet[t:t+20]
 
-            #now unpack them :)
+            #Unpack TCP header. Returned object is a tuple
             tcph = unpack('!HHLLBBHHH' , tcp_header)
-
-            source_port = tcph[0]
-            dest_port = tcph[1]
+            
+            #the objects within the TCP tuple are integer
+            s_port = tcph[0]
+            d_port = tcph[1]
             sequence = tcph[2]
             acknowledgement = tcph[3]
             doff_reserved = tcph[4]
             tcph_length = doff_reserved >> 4
             tcph_flags = tcph[5]
 
-            print 'Source Port : ' + str(source_port) + ' Dest Port : ' + str(dest_port) + ' Sequence Number : ' + str(sequence) + 'Acknowledgement : ' + str(acknowledgement) + ' TCP header length :' + str(tcph_length) + ' TCP Flags : ' + str(tcph_flags)
-
+            #print 'Source Port : ' + str(source_port) + ' Dest Port : ' + str(dest_port) + ' Sequence Number : ' + str(sequence) + 'Acknowledgement : ' + str(acknowledgement) + ' TCP header length :' + str(tcph_length) + ' TCP Flags : ' + str(tcph_flags)
             h_size = eth_length + iph_length + tcph_length * 4
             data_size = len(packet) - h_size
+            
+            #Capture new connections
+            #+-+-+-+-+-+-+
+            #|U|A|P|R|S|F|
+            #|R|C|S|S|Y|I|
+            #|G|K|H|T|N|N|
+            #+-+-+-+-+-+-+
+            # 3 1 8 4 2 1
+            if tcph_flags == 2 :
+                add_flow(s_addr,d_addr,s_port,d_port)
 
             #get data from the packet
             data = packet[h_size:]
 
-            print 'Data : ' + data
+            #print 'Data : ' + data
 
         #ICMP Packets
         elif protocol == 1 :
@@ -159,12 +167,14 @@ def parse_packet(packet) :
         #some other IP packet like IGMP
         else :
             print 'Protocol other than TCP/UDP/ICMP'
-
         print
 
 def main(argv):
-
-    check_permissions()
+    
+    #Check if program is being executed by root
+    if check_sudo() is False:
+            exit("[!] please run '%s' with sudo/Administrator privileges" % \
+            __file__)
     '''
     open device
     # Arguments here are:
@@ -174,7 +184,7 @@ def main(argv):
     #   timeout (in milliseconds)
     '''
     cap = pcapy.open_live(pick_device() , 65000 , 1 , 100)
-
+    
     #start sniffing packets
     while(1) :
         try:
