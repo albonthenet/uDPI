@@ -1,0 +1,3 @@
+Modulo de lectura de metadatos (eg: HTTP URI, DNS queries, ...)
+
+
