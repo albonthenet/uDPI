@@ -91,9 +91,13 @@ def signal_handler(signal, frame):
     print
     print 'ProgramFlows captured info:'
     global _flows
+    """
     for k,v in _flows.iteritems():
         print "Connection ID: " + str(k) + " | connId: " + str(v[0]) + " | \
         npackets: " + str(v[1]) + " | proto: " + v[2]
+    """
+    for k,v in _flows.iteritems():
+        print "Connection ID: " + str(k) + " | npackets: " + str(v)
     sys.exit(0)
 
 #Convert a string of 6 characters of ethernet address into a dash separated hex string
@@ -108,11 +112,13 @@ def check_flow(proto, s_addr, d_addr, s_port, d_port):
     connId = CityHash64(aux_id)
     connId_revr = CityHash64(aux_id_revr)
     print 'ConnId:  ' + str(connId)
-
+    print 'ConnId_r:  ' + str(connId_revr)
+    
     global _flows
     global _connNum
     
     #Check if the connection already exists
+    """
     if connId not in _flows  and connId_revr not in _flows:
         print "New connection established. ConnId: %i" % (connId)
         proto = proto_class(d_port)
@@ -126,6 +132,24 @@ def check_flow(proto, s_addr, d_addr, s_port, d_port):
         #Since this connection already exists we update the number of packets
         #counter for this flow
         _flows[connId][1]+=1
+        return False
+    """
+
+    if connId not in _flows:
+        if connId_revr in _flows:
+        #not new, existing conn packet
+            _flows[connId_revr]+=1
+            return False
+        else:
+            proto = proto_class(d_port)
+            _flows.update({connId : 1})
+            print "New connection established. ConnId: %i" % (connId)
+            return True
+    else:
+        print "Connection not new"
+        #Since this connection already exists we update the number of packets
+        #counter for this flow
+        _flows[connId]+=1
         return False
 
 #function to parse a packet
@@ -208,8 +232,6 @@ def parse_packet(packet, ptimestamp) :
                 if debug_showdata:
                     print 'paquete no SYN: %d' % (count)
                 count += 1
-
-            #print 'Data : ' + data
 
         #ICMP Packets
         elif protocol == 1 :

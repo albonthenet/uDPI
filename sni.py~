@@ -3,9 +3,11 @@ from struct import *
 import datetime
 import pcapy
 import sys
+import signal
 
 import core.types as types
 from core.aux import *
+from cityhash import CityHash64
 
 """TODO
     -add pcapy library check function
@@ -15,12 +17,60 @@ from core.aux import *
     -use/create some logging tool to log events, no IP traffic, etc
 """
 
+#Debug variables switches
+debug_showdata = False
+
 #classes and variables
-
+count = 0
+_connNum = 0
 _flows = {}
-
 #Packet_info type declaration example:
 #p1 = types.Packet_info(0.77742, 1, "dddddddd")
+
+def ip_class(ipclass_in):
+    if ipclass_in == 1:
+        ipclass_out = 'icmp'
+    elif ipclass_in == 6:
+        ipclass_out = 'tcp'
+    elif ipclass_in == 17:
+        ipclass_out = 'udp'
+    elif ipclass_in == 50:
+        ipclass_out = 'esp'
+    elif ipclass_in == 51:
+        ipclass_out = 'ah'
+    elif ipclass_in == 89:
+        ipclass_out = 'ospf'
+    else:
+        ipclass_out = 'unknown'
+
+def proto_class(proto_in):
+    if proto_in == 80:
+        proto_out = 'http'
+    elif proto_in == 443:
+        proto_out = 'https'
+    elif proto_in == 21 or proto_in == 20:
+        proto_out = 'ftp'
+    elif proto_in == 53:
+        proto_out = 'dns'
+    elif proto_in == 22:
+        proto_out = 'ssh'
+    elif proto_in == 23:
+        proto_out = 'telnet'
+    elif proto_in == 25:
+        proto_out = 'smtp'
+    elif proto_in == 110 or proto_in == 995:
+        proto_out = 'pop3'
+    elif proto_in == 143 or proto_in == 220 or proto_in == 993:
+        proto_out = 'imap'
+    elif proto_in == 123:
+        proto_out = 'ntp'
+    elif proto_in == 194:
+        proto_out = 'irc'
+    elif proto_in == 88:
+        proto_out = 'kerberos'
+    else:
+        proto_out = 'unknown'
+    return proto_out
 
 def pick_device():
     #list all devices
@@ -35,16 +85,75 @@ def pick_device():
     print "Sniffing device chosen: " + dev
     return dev
 
+#Signal capture for ctrl-c
+def signal_handler(signal, frame):
+    print 'Total number of packets captured: ' + str(count)
+    print
+    print 'ProgramFlows captured info:'
+    global _flows
+    """
+    for k,v in _flows.iteritems():
+        print "Connection ID: " + str(k) + " | connId: " + str(v[0]) + " | \
+        npackets: " + str(v[1]) + " | proto: " + v[2]
+    """
+    for k,v in _flows.iteritems():
+        print "Connection ID: " + str(k) + " | npackets: " + str(v[0])
+    sys.exit(0)
+
 #Convert a string of 6 characters of ethernet address into a dash separated hex string
 def eth_addr (a) :
     b = "%.2x:%.2x:%.2x:%.2x:%.2x:%.2x" % (ord(a[0]) , ord(a[1]) , ord(a[2]), ord(a[3]), ord(a[4]) , ord(a[5]))
     return b
 
-def add_flow(s_addr, d_addr, s_port, d_port) :
-    print "nueva conex capturada"
+#Creates a new connection id based on the 4 tuple
+def check_flow(proto, s_addr, d_addr, s_port, d_port):
+    aux_id = str(s_addr) + str(d_addr) + str(s_port) + str(d_port)
+    aux_id_revr = str(d_addr) + str(s_addr) + str(d_port) + str(s_port)
+    connId = CityHash64(aux_id)
+    connId_revr = CityHash64(aux_id_revr)
+    print 'ConnId:  ' + str(connId)
+    print 'ConnId_r:  ' + str(connId_revr)
+    
+    global _flows
+    global _connNum
+    
+    #Check if the connection already exists
+    """
+    if connId not in _flows  and connId_revr not in _flows:
+        print "New connection established. ConnId: %i" % (connId)
+        proto = proto_class(d_port)
+        #_flows.update({connId : 1})
+        _connNum = _connNum+1
+        _flows.update({connId : [_connNum,1,proto]})
+        _flows.update({connId_revr : [_connNum,1,proto]})
+        return True
+    else:
+        print "Connection not new"
+        #Since this connection already exists we update the number of packets
+        #counter for this flow
+        _flows[connId][1]+=1
+        return False
+    """
+
+    if connId not in _flows:
+        if connId_revr in _flows:
+        #not new, existing conn packet
+            _flows[connId_revr]+=1
+            return False
+        else:
+            proto = proto_class(d_port)
+            _flows.update({connId : 1})
+            print "New connection established. ConnId: %i" % (connId)
+            return True
+    else:
+        print "Connection not new"
+        #Since this connection already exists we update the number of packets
+        #counter for this flow
+        _flows[connId]+=1
+        return False
 
 #function to parse a packet
-def parse_packet(packet) :
+def parse_packet(packet, ptimestamp) :
 
     #parse ethernet header
     eth_length = 14
@@ -60,7 +169,7 @@ def parse_packet(packet) :
         #Strip from the ethernet offset + 20 Bytes (IP Header contains 160bit)
         ip_header = packet[eth_length:(eth_length+20)]
         
-        #Here we unpack the data into "iph" buffer according to the IP header
+        #Here we unpack the data into "iph" buffer tuple according to the IP header
         #fields
         #https://en.wikipedia.org/wiki/IPv4#Header
         #https://docs.python.org/2/library/struct.html
@@ -78,7 +187,8 @@ def parse_packet(packet) :
         s_addr = socket.inet_ntoa(iph[8]);
         d_addr = socket.inet_ntoa(iph[9]);
 
-        #print 'Version : ' + str(version) + ' IP Header Length : ' + str(ihl) + ' TTL : ' + str(ttl) + ' Protocol : ' + str(protocol) + ' Source Address : ' + str(s_addr) + ' Destination Address : ' + str(d_addr)
+        if debug_showdata:
+            print 'Version : ' + str(version) + ' IP Header Length : ' + str(ihl) + ' TTL : ' + str(ttl) + ' Protocol : ' + str(protocol) + ' Source Address : ' + str(s_addr) + ' Destination Address : ' + str(d_addr)
 
         #TCP protocol
         if protocol == 6 :
@@ -101,6 +211,9 @@ def parse_packet(packet) :
             h_size = eth_length + iph_length + tcph_length * 4
             data_size = len(packet) - h_size
             
+            #get data from the packet
+            data = packet[h_size:]
+            
             #Capture new connections
             #+-+-+-+-+-+-+
             #|U|A|P|R|S|F|
@@ -108,13 +221,17 @@ def parse_packet(packet) :
             #|G|K|H|T|N|N|
             #+-+-+-+-+-+-+
             # 3 1 8 4 2 1
+            global count
+            print str(tcph_flags)
             if tcph_flags == 2 :
-                add_flow(s_addr,d_addr,s_port,d_port)
-
-            #get data from the packet
-            data = packet[h_size:]
-
-            #print 'Data : ' + data
+                if check_flow('tcp', s_addr,d_addr,s_port,d_port) == False :
+                    print 'ALERT - SYN received for an already existing connection'
+                count += 1
+            else:
+                check_flow('tcp', s_addr,d_addr,s_port,d_port)
+                if debug_showdata:
+                    print 'paquete no SYN: %d' % (count)
+                count += 1
 
         #ICMP Packets
         elif protocol == 1 :
@@ -128,18 +245,17 @@ def parse_packet(packet) :
             icmp_type = icmph[0]
             code = icmph[1]
             checksum = icmph[2]
-
-            print 'Type : ' + str(icmp_type) + ' Code : ' + str(code) + ' Checksum : ' + str(checksum)
+            if debug_showdata:
+                print 'Type : ' + str(icmp_type) + ' Code : ' + str(code) + ' Checksum : ' + str(checksum)
 
             h_size = eth_length + iph_length + icmph_length
             data_size = len(packet) - h_size
 
             #Data layer
             data = packet[h_size:]
-
-            print 'Data : ' + data
-            print 'Data hex: ' + ':'.join(x.encode('hex') for x in data)
-            #print 'data es de tipo %s' % type(data)
+            if debug_showdata:
+                print 'Data : ' + data
+                print 'Data hex: ' + ':'.join(x.encode('hex') for x in data)
 
         #UDP packets
         elif protocol == 17 :
@@ -154,20 +270,21 @@ def parse_packet(packet) :
             dest_port = udph[1]
             length = udph[2]
             checksum = udph[3]
-
-            print 'Source Port : ' + str(source_port) + ' Dest Port : ' + str(dest_port) + ' Length : ' + str(length) + ' Checksum : ' + str(checksum)
+            
+            if debug_showdata:
+                print 'Source Port : ' + str(source_port) + ' Dest Port : ' + str(dest_port) + ' Length : ' + str(length) + ' Checksum : ' + str(checksum)
 
             h_size = eth_length + iph_length + udph_length
             data_size = len(packet) - h_size
 
             #Data layer
             data = packet[h_size:]
-            print 'Data : ' + data
+            if debug_showdata:
+                print 'Data : ' + data
 
         #some other IP packet like IGMP
         else :
             print 'Protocol other than TCP/UDP/ICMP'
-        print
 
 def main(argv):
     
@@ -183,16 +300,19 @@ def main(argv):
     #   promiscious mode (1 for true)
     #   timeout (in milliseconds)
     '''
-    cap = pcapy.open_live(pick_device() , 65000 , 1 , 100)
+    #Ctrl-c signal capture handler
+    signal.signal(signal.SIGINT, signal_handler)
     
+    cap = pcapy.open_live(pick_device() , 65000 , 1 , 100)
     #start sniffing packets
     while(1) :
         try:
                 (header, packet) = cap.next()
-                parse_packet(packet)
+                parse_packet(packet, header.getts()[0])
         except socket.timeout:
                 continue
-        print ('%s: captured %d bytes, truncated to %d bytes' %(datetime.datetime.now(), header.getlen(), header.getcaplen()))
+        if debug_showdata:
+            print ('%s: captured %d bytes, truncated to %d bytes' %(datetime.datetime.now(), header.getlen(), header.getcaplen()))
 
 
 if __name__ == "__main__":
