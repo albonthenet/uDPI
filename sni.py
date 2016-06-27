@@ -1,4 +1,3 @@
-
 import datetime
 import pcapy
 import sys
@@ -104,7 +103,16 @@ def signal_handler(signal, frame):
         npackets: " + str(v[1]) + " | proto: " + v[2]
     """
     for k,v in _flows.iteritems():
-        print "Connection ID: " + str(k) + " | npackets: " + str(v)
+        print "Connection ID: " + str(k) + " | npackets: " + str(v[0])
+        for i in range(1,len(v)):
+            print 'Packet n#' + str(i)
+            print 'Src IP address: %s' % (v[i].getSrc_ip())
+            print 'Dst IP address: %s' % (v[i].getDst_ip())
+            print 'Src Port: %d' % (v[i].getSrc_port())
+            print 'Dst Port: %d' % (v[i].getDst_port())
+            print 'Protocol: %s' % (v[i].getProto())
+            print 'Timestamp: %s' % (v[i].getTimestamp())
+            print 'Length: %d' % (v[i].getPktlength())
     sys.exit(0)
 
 #Convert a string of 6 characters of ethernet address into a dash separated hex string
@@ -135,11 +143,12 @@ def inspect_packet(p):
     if connId not in _flows:
         if connId_revr in _flows:
         #not new, existing conn packet
-            _flows[connId_revr]+=1
+            _flows[connId_revr][0]+=1
+            _flows[connId_revr].append(p)
             return False
         else:
             #proto = proto_class(d_port)
-            _flows.update({connId : 1})
+            _flows.update({connId : [1,p]})
             print "New connection established. ConnId: %i" % (connId)
             return True
     else:
@@ -147,7 +156,8 @@ def inspect_packet(p):
             print "Connection not new"
         #Since this connection already exists we update the number of packets
         #counter for this flow
-        _flows[connId]+=1
+        _flows[connId][0]+=1
+        _flows[connId].append(p)
         return False
 
 #function to parse a packet
@@ -202,6 +212,10 @@ def parse_packet(packet, ptimestamp) :
             #print 'Source Port : ' + str(source_port) + ' Dest Port : ' + str(dest_port) + ' Sequence Number : ' + str(sequence) + 'Acknowledgement : ' + str(acknowledgement) + ' TCP header length :' + str(tcph_length) + ' TCP Flags : ' + str(tcph_flags)
             h_size = const.ETHER_HEAD_LENGTH + iph_length + tcph_length * 4
             data_size = len(packet) - h_size
+            #dirty fix to avoid ethernet 6 bytes  padding frames size
+            #which size is smaller than 60 bytes (typically TCP ACKs)
+            if data_size == 6:
+                data_size = 0
             #get data from the packet
             payload = packet[h_size:]
             
