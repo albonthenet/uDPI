@@ -5,11 +5,14 @@ import signal
 import socket
 from struct import *
 
+#Library for python debugging
 import pdb
-
+#Argument parsing lib
+from optparse import OptionParser
 
 import core.types as types
 import core.const as const
+from core.packet_checks import *
 from core.aux import *
 from cityhash import CityHash64
 
@@ -19,21 +22,30 @@ from cityhash import CityHash64
     -define constants for IP(8), TCP flags(SYN==2) etc
     -add exceptions where it proceeds 
     -add methods for get/set in types lib [TO CHECK HOW IT WORKS FIRST!]
+    -pass the sniffing iface as parameter/config file
     -use/create some logging tool to log events, no IP traffic, etc
 """
 
 #Constants definition
 const.IP_PROTO = 0x08
 const.ETHER_HEAD_LENGTH = 14
+const.INBOUND = 0
+const.OUTBOUND = 1
 
-#Debug variables switches
+#Debug variables ones
 debug_showdata = False
 
-#classes and variables
+#global variables
+VERSION = "0.1"
 count = 0
-_connNum = 0
-_flows = {}
-#Packet_info type declaration example:
+connNum = 0
+flows = {}
+macaddr = None
+#One of the variables simply boolean to learn active
+#Othe indicates if active the type of protocol to learn
+learn_protocol_on = False
+learn_protocol_type = None 
+
 
 def ip_class(ipclass_in):
     if ipclass_in == 1:
@@ -87,7 +99,10 @@ def pick_device():
     print "Available devices are :"
     for d in devices :
         print d
-    dev = raw_input("Enter device name to sniff : ")
+    while True:
+        dev = raw_input("Enter device name to sniff : ")
+        if dev not in devices: print "ERROR: The selected interface is not valid"
+        else:break
     print "Sniffing device chosen: " + dev
     return dev
 
@@ -96,29 +111,65 @@ def signal_handler(signal, frame):
     print 'Total number of packets captured: ' + str(count)
     print
     print 'ProgramFlows captured info:'
-    global _flows
+    global flows
     """
-    for k,v in _flows.iteritems():
+    for k,v in flows.iteritems():
+        print "Connection ID: " + str(k)\
+        + " | npackets: " + str(v.getNpack())\
+        + " | >500: " + str(v.npack_gt500) + " | <500: " + str(v.npack_lt500)\
+        + " | npackets in: " + str(v.npack_inbound)\
+        + " | npackets out: " + str(v.npack_outbound)\
+        + " | npackets w/payload : " + str(v.npack_payload)\
+        + " | packets avg. size : " + str(v.npack_avgsize)
+    """
+
+    """
+    for k,v in flows.iteritems():
         print "Connection ID: " + str(k) + " | connId: " + str(v[0]) + " | \
         npackets: " + str(v[1]) + " | proto: " + v[2]
     """
-    for k,v in _flows.iteritems():
-        print "Connection ID: " + str(k) + " | npackets: " + str(v[0])
+    
+    """
+    for k,v in flows.iteritems():
+        print "Connection ID: " + str(k) + " | npackets: " + str(v.getNpack())
         for i in range(1,len(v)):
             print 'Packet n#' + str(i)
             print 'Src IP address: %s' % (v[i].getSrc_ip())
-            print 'Dst IP address: %s' % (v[i].getDst_ip)
+            print 'Dst IP address: %s' % (v[i].getDst_ip())
             print 'Src Port: %d' % (v[i].getSrc_port())
             print 'Dst Port: %d' % (v[i].getDst_port())
             print 'Protocol: %s' % (v[i].getProto())
             print 'Timestamp: %s' % (v[i].getTimestamp())
             print 'Length: %d' % (v[i].getPktlength())
+    """
     sys.exit(0)
 
 #Convert a string of 6 characters of ethernet address into a dash separated hex string
 def eth_addr (a) :
     b = "%.2x:%.2x:%.2x:%.2x:%.2x:%.2x" % (ord(a[0]) , ord(a[1]) , ord(a[2]), ord(a[3]), ord(a[4]) , ord(a[5]))
     return b
+
+def create_dataset():
+    """
+    This function will create a data set given by an input data 
+    in form of features and the provided target class
+    """
+
+def learning(f):
+    #This variable contains the type of protocol to learn
+    global learn_protocol_type
+    flow_npack = f.getNpack()
+    if flow_npack%15==0:
+        #By checking this condition we ignore the first 15 packets of each new
+        #flow
+        if f.nreset >= 1:
+            print str(f.npack_lt50) + ',' + str(f.npack_lt50_in) + ',' + str(f.npack_lt50_out) + ',' +\
+            str(f.npack_gt1300) + ',' + str(f.npack_gt1300_in) + ',' + str(f.npack_gt1300_out) + ',' +\
+            str(f.npack_inbound) + ',' + str(f.npack_outbound) + ',' +\
+            str(f.npack_payload) + ',' + str(f.npack_payload_in) + ',' +str(f.npack_payload_out) + ',' +\
+            str(f.npack_avgsize) + ',' + str(f.npack_avgsize_in) + ',' + str(f.npack_avgsize_out) + ',' +\
+            str(learn_protocol_type)
+        f.reset()
 
 #Inspect packet to find out if new connection or existing based on 5tuple
 #def inspect_packet(proto, s_addr, d_addr, s_port, d_port):
@@ -131,34 +182,49 @@ def inspect_packet(p):
     if debug_showdata == True:
         print 'ConnId:  ' + str(connId)
         print 'ConnId_r:  ' + str(connId_revr)
-    
-    global _flows
-    global _connNum
-
-    print p.getTimestamp()
-
-
-    #Check if the connection already exists
-    #pdb.set_trace()
-    if connId not in _flows:
-        if connId_revr in _flows:
-        #not new, existing conn packet
-            _flows[connId_revr][0]+=1
-            _flows[connId_revr].append(p)
-            return False
+        if p.direction == const.INBOUND:
+            print "packet inbound"
         else:
-            #proto = proto_class(d_port)
-            _flows.update({connId : [1,p]})
-            print "New connection established. ConnId: %i" % (connId)
-            return True
-    else:
-        if debug_showdata == True:
-            print "Connection not new"
-        #Since this connection already exists we update the number of packets
-        #counter for this flow
-        _flows[connId][0]+=1
-        _flows[connId].append(p)
+            print "packet outbound"
+    
+    #Access to these global variables
+    global flows
+    global connNum
+    global learn_protocol_on
+
+    #pdb.set_trace()
+    if connId in flows:
+        update_flow(flows[connId],p)
+        if learn_protocol_on:
+            learning(flows[connId])
         return False
+    elif connId not in flows and connId_revr in flows:
+        update_flow(flows[connId_revr],p)
+        if learn_protocol_on:
+            learning(flows[connId_revr])
+        return False
+    else:
+        #New connection - We add first packet (p) to new flow (flow)
+        flow = types.Flow()
+        update_flow(flow,p)
+        flows.update({connId : flow})
+        print "New connection established. ConnId: %i" % (connId)
+        return True
+    
+    """
+    if connId in flows:
+        flows[connId][0]+=1
+        flows[connId].append(p)
+        return False
+    elif connId not in flows and connId_revr in flows:
+        flows[connId_revr][0]+=1
+        flows[connId_revr].append(p)
+        return False
+    else:
+        flows.update({connId : [1,p]})
+        print "New connection established. ConnId: %i" % (connId)
+        return True
+    """
 
 #function to parse a packet
 def parse_packet(packet, ptimestamp) :
@@ -167,6 +233,8 @@ def parse_packet(packet, ptimestamp) :
     eth = unpack('!6s6sH' , eth_header)
     eth_protocol = socket.ntohs(eth[2])
     #print 'Destination MAC : ' + eth_addr(packet[0:6]) + ' Source MAC : ' + eth_addr(packet[6:12]) + ' Protocol : ' + str(eth_protocol)
+
+    direction = packet_direction(eth_addr(packet[6:12]),macaddr)
 
     #Parse IP packets, IP Protocol number = 8
     if eth_protocol == const.IP_PROTO :
@@ -229,7 +297,7 @@ def parse_packet(packet, ptimestamp) :
             global count
             count+=1
             #Construction of packet object
-            p = types.Packet(s_addr,d_addr,s_port,d_port,protocol,ptimestamp,data_size,payload)
+            p = types.Packet(s_addr,d_addr,s_port,d_port,protocol,direction,ptimestamp,data_size,payload)
             
             #Sustituir por un logging event
             
@@ -294,7 +362,6 @@ def parse_packet(packet, ptimestamp) :
             print 'Protocol other than TCP/UDP/ICMP'
 
 def main(argv):
-    
     #Check if program is being executed by root
     if check_sudo() is False:
             exit("[!] please run '%s' with sudo/Administrator privileges" % \
@@ -309,7 +376,35 @@ def main(argv):
     '''
     #Ctrl-c signal capture handler
     signal.signal(signal.SIGINT, signal_handler)
-    
+
+    #Parsing options stuff
+    parser = OptionParser(usage="%prog [-l protocol-to-learn] [-d result]", version="%prog"+VERSION)
+    parser.add_option("-l", "--learn", dest="learn_protocol",help="Create dataset for learning")
+    parser.add_option("-d", "--detect", dest="detect",help="Start detection and write to an output file")
+    (options, args) = parser.parse_args()
+
+    if options.learn_protocol and options.detect:
+        parser.error("ERROR: Not possible to learn and detect yet")
+        exit()
+    elif options.learn_protocol:
+        global learn_protocol_type
+        global learn_protocol_on
+        learn_protocol_on = True
+        learn_protocol_type = options.learn_protocol
+        print 'Learning for protocol: ' + str(learn_protocol_type)
+    elif options.detect:
+        print "Detecting...TBD"
+    else:
+        print 'Invalid arguments. Either you need to learn or detect'
+        parser.print_help()
+        exit()
+
+    #Capture the DPI NIC MAC address
+    global macaddr
+    macaddr = getHwAddr('eth1')
+    print "Current MAC address for listening interface: " + macaddr
+
+    #Start of uDPI stuff
     cap = pcapy.open_live(pick_device() , 65000 , 1 , 100)
     #start sniffing packets
     while(1) :
@@ -323,7 +418,6 @@ def main(argv):
                 continue
         if debug_showdata:
             print ('%s: captured %d bytes, truncated to %d bytes' %(datetime.datetime.now(), header.getlen(), header.getcaplen()))
-
 
 if __name__ == "__main__":
     main(sys.argv)
