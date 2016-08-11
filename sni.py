@@ -31,7 +31,7 @@ const.IP_PROTO = 0x08
 const.ETHER_HEAD_LENGTH = 14
 const.INBOUND = 0
 const.OUTBOUND = 1
-
+const.N_SAMPLES = 15
 #Debug variables ones
 debug_showdata = False
 
@@ -44,8 +44,7 @@ macaddr = None
 #One of the variables simply boolean to learn active
 #Othe indicates if active the type of protocol to learn
 learn_protocol_on = False
-learn_protocol_type = None 
-
+learn_protocol_type = None
 
 def ip_class(ipclass_in):
     if ipclass_in == 1:
@@ -155,20 +154,35 @@ def create_dataset():
     in form of features and the provided target class
     """
 
+def dataset_print_arff(f):
+    """
+    This function simply creates a file with a new line using a similar ARFF
+    format by using the flow parameter 'f'
+    """
+    dataset_line = ""
+    dataset_line = str(f.npack_small) + ',' + str(f.npack_small_in) + ',' + str(f.npack_small_out) + ',' +\
+    str(f.npack_med) + ',' + str(f.npack_med_in) + ',' + str(f.npack_med_out) + ',' +\
+    str(f.npack_large) + ',' + str(f.npack_large_in) + ',' + str(f.npack_large_out) + ',' +\
+    str(f.npack_inbound) + ',' + str(f.npack_outbound) + ',' +\
+    str(f.npack_payload) + ',' + str(f.npack_payload_in) + ',' +str(f.npack_payload_out) + ',' +\
+    str(f.npack_avgsize) + ',' + str(f.npack_avgsize_in) + ',' + str(f.npack_avgsize_out) + ',' +\
+    str(learn_protocol_type) + '\n'
+    print dataset_line
+
+    #Open file descriptor for writing the dataset
+    file_descriptor = open_dataset(learn_protocol_type)
+    file_descriptor.write(dataset_line)
+    file_descriptor.close()
+
 def learning(f):
     #This variable contains the type of protocol to learn
     global learn_protocol_type
     flow_npack = f.getNpack()
-    if flow_npack%15==0:
+    if flow_npack % const.N_SAMPLES == 0:
         #By checking this condition we ignore the first 15 packets of each new
         #flow
         if f.nreset >= 1:
-            print str(f.npack_lt50) + ',' + str(f.npack_lt50_in) + ',' + str(f.npack_lt50_out) + ',' +\
-            str(f.npack_gt1300) + ',' + str(f.npack_gt1300_in) + ',' + str(f.npack_gt1300_out) + ',' +\
-            str(f.npack_inbound) + ',' + str(f.npack_outbound) + ',' +\
-            str(f.npack_payload) + ',' + str(f.npack_payload_in) + ',' +str(f.npack_payload_out) + ',' +\
-            str(f.npack_avgsize) + ',' + str(f.npack_avgsize_in) + ',' + str(f.npack_avgsize_out) + ',' +\
-            str(learn_protocol_type)
+            dataset_print_arff(f)
         f.reset()
 
 #Inspect packet to find out if new connection or existing based on 5tuple

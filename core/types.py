@@ -65,32 +65,36 @@ class Flow(object):
     #npack_lt500, app):
     def __init__(self):
         super(Flow, self).__init__()
-        """
-        self.npack_inbound = npack_inbound
-        self.npack_outbound = npack_outbound
-        self.npack_gt500 = npack_gt500
-        self.npack_lt500 = npack_lt500
-        self.app = app
-        """
+        
         self.npack_inbound = 0
         self.npack_outbound = 0
         #Average of inbound/outbound packets
         self.npack_avg_inout = 0
-
-        self.npack_gt1300 = 0
-        self.npack_gt1300_in = 0
-        self.npack_gt1300_out = 0
-        
-        self.npack_lt50 = 0
-        self.npack_lt50_in = 0
-        self.npack_lt50_out = 0
-        
+        #Small size payload packets
+        self.npack_small = 0
+        self.npack_small_in = 0
+        self.npack_small_out = 0
+        #Medium size payload packets
+        self.npack_med = 0
+        self.npack_med_in = 0
+        self.npack_med_out = 0
+        #Large payload packets
+        self.npack_large = 0
+        self.npack_large_in = 0
+        self.npack_large_out = 0
+        #Packets containing payload
         self.npack_payload = 0
         self.npack_payload_in = 0
         self.npack_payload_out = 0
+        #Average packets
         self.npack_avgsize = 0
         self.npack_avgsize_in = 0
         self.npack_avgsize_out = 0
+        #Aux variables for time delta calculation
+        self.time_first = (0,0);
+        self.time_last = (0,0);
+        #Delta time since the first/last packet of the sample
+        self.tdelta_sample = 0
         #Counts the number of resets (samples)
         self.nreset = 0
         self.app = 'unknown'
@@ -98,18 +102,24 @@ class Flow(object):
     def reset(self):
         self.npack_inbound = 0
         self.npack_outbound = 0
-        self.npack_gt1300 = 0
-        self.npack_gt1300_in = 0
-        self.npack_gt1300_out = 0
-        self.npack_lt50 = 0
-        self.npack_lt50_in = 0
-        self.npack_lt50_out = 0
+        self.npack_small = 0
+        self.npack_small_in = 0
+        self.npack_small_out = 0
+        self.npack_med = 0
+        self.npack_med_in = 0
+        self.npack_med_out = 0
+        self.npack_large = 0
+        self.npack_large_in = 0
+        self.npack_large_out = 0
         self.npack_payload = 0
         self.npack_payload_in = 0
         self.npack_payload_out = 0
         self.npack_avgsize = 0
         self.npack_avgsize_in = 0
         self.npack_avgsize_out = 0
+        self.time_first = (0,0);
+        self.time_last = (0,0);
+        self.tdelta_sample = 0
         self.nreset+=1
     
     def getNpack_inbound(self):

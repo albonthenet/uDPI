@@ -30,3 +30,11 @@ def packet_direction(mac1, mac2):
     else:
         return const.INBOUND
 
+def open_dataset(protocol_name):
+    filename = protocol_name + '.ds'
+    #if os.path.isfile(filename) is True:
+        #print filename + ' dataset file exits. Appending'
+    fo = open(filename, "a+")
+    return fo
+
+
