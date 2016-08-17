@@ -1,19 +1,26 @@
+#General porpuse import library
 import datetime
 import pcapy
 import sys
 import signal
 import socket
-from struct import *
-
+import operator
+#Scikit-learn libraries related
+import numpy as np
+from sklearn import metrics
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
 #Library for python debugging
 import pdb
 #Argument parsing lib
 from optparse import OptionParser
-
+#Internal libraries
 import core.types as types
 import core.const as const
 from core.packet_checks import *
 from core.aux import *
+from struct import *
+#Library for conn hashing
 from cityhash import CityHash64
 
 """TODO
@@ -32,19 +39,42 @@ const.ETHER_HEAD_LENGTH = 14
 const.INBOUND = 0
 const.OUTBOUND = 1
 const.N_SAMPLES = 15
+#Classification attemps default value (3) (custom value may be given by param)
+const.N_CLASSIF_ATTEMPTS = 3
 #Debug variables ones
 debug_showdata = False
-
-#global variables
+#########################
+#   Global Variables    #
+#########################
 VERSION = "0.1"
 count = 0
 connNum = 0
 flows = {}
 macaddr = None
+
+#global variable for sckit-learn object
+model = None
+model2 = None
 #One of the variables simply boolean to learn active
 #Othe indicates if active the type of protocol to learn
 learn_protocol_on = False
 learn_protocol_type = None
+#Same funcionality than previous for detecting
+detect_protocol_on = False
+classification_attempts = const.N_CLASSIF_ATTEMPTS
+#Number of attributes in the current dataset (based on CSV files)
+num_attributes = None
+#Dictionary with supported protocol - matched value for dataset
+#supported_protocol = {1:'whatsapp', 2:'ssh', 3:'ftp', 4:'spotify'}
+supported_protocols = {'whatsapp':1,\
+    'ssh':2,\
+    'ftp':3,\
+    'spotify':4,\
+    'skype':5,\
+    'http-web':6,\
+    'bittorrent':7,\
+    'android-background':8}
+
 
 def ip_class(ipclass_in):
     if ipclass_in == 1:
@@ -107,10 +137,23 @@ def pick_device():
 
 #Signal capture for ctrl-c
 def signal_handler(signal, frame):
+    #TBD distinguir el handler entre learning y detecting!
     print 'Total number of packets captured: ' + str(count)
     print
     print 'ProgramFlows captured info:'
-    global flows
+    #global flows
+    #We do some pre-sorting by values for better representation
+    sorted_flows = {}
+    for k,v in flows.iteritems():
+        print "Connection ID: " + str(k) + ' : ' + str(v.protocol[0])
+        sorted_flows.update({k:str(v.protocol[0])})
+    
+    print '\n\nPrinting sorted...\n\n'
+    #Here we do some preprocessing converting this new dict to a list
+    sorted_flows = sorted(sorted_flows.items(), key=operator.itemgetter(1))
+    for k in range(len(sorted_flows)):
+        print "Connection ID: " + str(sorted_flows[k][0]) + ' : ' +sorted_flows[k][1]
+    
     """
     for k,v in flows.iteritems():
         print "Connection ID: " + str(k)\
@@ -166,10 +209,11 @@ def dataset_print_arff(f):
     str(f.npack_inbound) + ',' + str(f.npack_outbound) + ',' +\
     str(f.npack_payload) + ',' + str(f.npack_payload_in) + ',' +str(f.npack_payload_out) + ',' +\
     str(f.npack_avgsize) + ',' + str(f.npack_avgsize_in) + ',' + str(f.npack_avgsize_out) + ',' +\
+    str(f.tdelta_sample)+ ',' +\
     str(learn_protocol_type) + '\n'
     print dataset_line
 
-    #Open file descriptor for writing the dataset
+    #Open file descriptor for writing or appending new line to dataset
     file_descriptor = open_dataset(learn_protocol_type)
     file_descriptor.write(dataset_line)
     file_descriptor.close()
@@ -179,11 +223,61 @@ def learning(f):
     global learn_protocol_type
     flow_npack = f.getNpack()
     if flow_npack % const.N_SAMPLES == 0:
-        #By checking this condition we ignore the first 15 packets of each new
+        #By checking nreset value we ignore the first 15 packets of each new
         #flow
         if f.nreset >= 1:
             dataset_print_arff(f)
         f.reset()
+
+def check_flow_classification(f,prediction):
+    """
+    This function verifies if an existing flow has been already classified
+    and therefore the rest of the flow should not be re-classificated in 
+    order to improve performance. Bear in mind that an initial
+    misclassification may lead to the whole flow to be wrongly evaluated
+    """
+    global classification_attempts
+    if f.protocol[1]>=classification_attempts:
+        for proto,keymap in supported_protocols.iteritems():
+            if prediction == keymap:
+                f.protocol[0]=proto
+
+def inspect_flow(f):
+    """
+    This function takes the values of arbitrary flow samples and analyze them
+    by using scikit-learning machine learning methods to classify the
+    information received against a dataset for service classification
+    """
+    if f.protocol[0] is 'default':
+        flow_npack = f.getNpack()
+        if flow_npack % const.N_SAMPLES == 0:
+            #By checking nreset value we ignore the first 15 packets of each new
+            #flow
+            if f.nreset >= 1:
+                global model
+                global model2
+                sample = [[(f.npack_small) , (f.npack_small_in) , (f.npack_small_out) ,\
+                (f.npack_med) , (f.npack_med_in) , (f.npack_med_out) ,\
+                (f.npack_large) , (f.npack_large_in) , (f.npack_large_out) ,\
+                (f.npack_inbound) , (f.npack_outbound) ,\
+                (f.npack_payload) , (f.npack_payload_in) ,(f.npack_payload_out) ,\
+                (f.npack_avgsize) , (f.npack_avgsize_in) , (f.npack_avgsize_out) ,\
+                (f.tdelta_sample)]]
+                print 'Sample_input: ' + str(sample)
+                prediction = model.predict(sample)
+                print 'Predicition of protocol :' + str(prediction)
+                prediction2 = model2.predict(sample)
+                print 'Predicition2 of protocol :' + str(prediction2)
+
+                probability = model.predict_proba(sample)
+                print 'Probability of protocol :' + str(prediction)
+                probability = model2.predict_proba(sample)
+                print 'Probability2 of protocol :' + str(prediction2)
+                
+                #Increase the classification counter for this flow
+                f.protocol[1]+=1
+                check_flow_classification(f,prediction)
+            f.reset()
 
 #Inspect packet to find out if new connection or existing based on 5tuple
 #def inspect_packet(proto, s_addr, d_addr, s_port, d_port):
@@ -205,23 +299,30 @@ def inspect_packet(p):
     global flows
     global connNum
     global learn_protocol_on
+    global detect_protocol_on
 
     #pdb.set_trace()
     if connId in flows:
         update_flow(flows[connId],p)
         if learn_protocol_on:
             learning(flows[connId])
+        elif detect_protocol_on:
+            inspect_flow(flows[connId])
         return False
     elif connId not in flows and connId_revr in flows:
         update_flow(flows[connId_revr],p)
         if learn_protocol_on:
             learning(flows[connId_revr])
+        elif detect_protocol_on:
+            inspect_flow(flows[connId_revr])
         return False
     else:
         #New connection - We add first packet (p) to new flow (flow)
         flow = types.Flow()
         update_flow(flow,p)
         flows.update({connId : flow})
+        #Adding 5tuple info to the flow
+        #add_5tuple_info(f,p)
         print "New connection established. ConnId: %i" % (connId)
         return True
     
@@ -239,6 +340,13 @@ def inspect_packet(p):
         print "New connection established. ConnId: %i" % (connId)
         return True
     """
+
+#TBD sacar esta fucnion a un modulo
+def add_5tuple_info(f,p):
+    f.tuple5[0]=p.src_ip
+    f.tuple5[1]=p.dst_ip
+    f.tuple5[2]=p.src_port
+    f.tuple5[3]=p.dst_port
 
 #function to parse a packet
 def parse_packet(packet, ptimestamp) :
@@ -380,38 +488,59 @@ def main(argv):
     if check_sudo() is False:
             exit("[!] please run '%s' with sudo/Administrator privileges" % \
             __file__)
-    '''
+    """
     open device
     # Arguments here are:
     #   device
     #   snaplen (maximum number of bytes to capture _per_packet_)
     #   promiscous mode (1 for true)
     #   timeout (in milliseconds)
-    '''
+    """
     #Ctrl-c signal capture handler
     signal.signal(signal.SIGINT, signal_handler)
 
     #Parsing options stuff
     parser = OptionParser(usage="%prog [-l protocol-to-learn] [-d result]", version="%prog"+VERSION)
     parser.add_option("-l", "--learn", dest="learn_protocol",help="Create dataset for learning")
-    parser.add_option("-d", "--detect", dest="detect",help="Start detection and write to an output file")
+    parser.add_option("-d", "--detect", dest="dataset_load",help="Start detection and write to an output file")
+    parser.add_option("-a", "--attempts", dest="class_attempts", help="Number of classification attempts before a protocol is classified")
     (options, args) = parser.parse_args()
 
-    if options.learn_protocol and options.detect:
+    if options.learn_protocol and options.dataset_load:
         parser.error("ERROR: Not possible to learn and detect yet")
         exit()
     elif options.learn_protocol:
         global learn_protocol_type
         global learn_protocol_on
         learn_protocol_on = True
-        learn_protocol_type = options.learn_protocol
-        print 'Learning for protocol: ' + str(learn_protocol_type)
-    elif options.detect:
-        print "Detecting...TBD"
+        #TBD check that protocol is supported...
+        learn_protocol_type = supported_protocols[options.learn_protocol]
+        print 'Learning for protocol: ' +str(options.learn_protocol)+' ('+str(learn_protocol_type)+')'
+    elif options.dataset_load:
+        global detect_protocol_on
+        detect_protocol_on = True
+        print "Detecting protocols: " #TBD show list of currently supported
+        #TBD to check possible exceptions, file not found, etc
+        global model
+        global model2
+        dataset_path = options.dataset_load
+        data = np.genfromtxt(dataset_path, skip_header=True, delimiter=',')
+        model = DecisionTreeClassifier()
+        model2 = LogisticRegression(C=1.0, dual=False, fit_intercept=True,intercept_scaling=1,penalty='l2', tol=0.0001)
+        #get number of attributes in selected dataset
+        num_attributes = getNumAttributes(dataset_path)
+        features = data[:, :num_attributes]
+        targets = data[:, num_attributes]
+        model.fit(features,targets)
+        model2.fit(features, targets)
     else:
         print 'Invalid arguments. Either you need to learn or detect'
         parser.print_help()
         exit()
+
+    if options.class_attempts!= None and options.class_attempts!=const.N_CLASSIF_ATTEMPTS:
+        global classification_attempts
+        classification_attempts = options.class_attempts
 
     #Capture the DPI NIC MAC address
     global macaddr
@@ -419,7 +548,7 @@ def main(argv):
     print "Current MAC address for listening interface: " + macaddr
 
     #Start of uDPI stuff
-    cap = pcapy.open_live(pick_device() , 65000 , 1 , 100)
+    cap = pcapy.open_live(pick_device(),65000,1,100)
     #start sniffing packets
     while(1) :
         try:

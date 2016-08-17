@@ -2,6 +2,7 @@
 import os
 import fcntl, socket, struct
 import const as const
+import csv
 
 def check_sudo():
     """
@@ -31,10 +32,15 @@ def packet_direction(mac1, mac2):
         return const.INBOUND
 
 def open_dataset(protocol_name):
-    filename = protocol_name + '.ds'
+    filename = str(protocol_name) + '.ds'
     #if os.path.isfile(filename) is True:
         #print filename + ' dataset file exits. Appending'
     fo = open(filename, "a+")
     return fo
 
-
+def getNumAttributes(file):
+    """@brief returns the number of attributes located in a CSV file (param)
+    """
+    r= csv.reader(open(file))
+    l1=r.next()
+    return (len(l1)-1)

@@ -25,6 +25,7 @@ class Packet(object):
             self.proto = "icmp"
         else:
             self.proto = "unknown"
+    """
     def getSrc_ip(self):
         return self.src_ip
     def getDst_ip(self):
@@ -47,13 +48,14 @@ class Packet(object):
         return self.pktlength
     def getPayload(self):
         return self.payload
-
+    
     #Process the time tuple provided by pcapy to merge it
     #it may require some processing ...
     def __timeproc(ts):
         epoch = ts[0]
         milisec = ts[1]
         return (str(epoch) + '.' + str(milisec))
+    """
 
 class Flow(object):
     """@brief Flow attributes class definition:
@@ -95,9 +97,27 @@ class Flow(object):
         self.time_last = (0,0);
         #Delta time since the first/last packet of the sample
         self.tdelta_sample = 0
+        #bps
+        self.bps_sample = 0
+        ##
+        ##AUX variables for Flow object
+        ##
         #Counts the number of resets (samples)
         self.nreset = 0
-        self.app = 'unknown'
+        #Stores the total payload size for the sample
+        self.size_payload_sample = 0
+        #Stores the total payload for the total flow for statistics
+        self.size_payload_total = 0
+        #Protocol id for a flow object
+        #number of classifications for this flow
+        self.protocol = ['default',0]
+        #This list keeps the total of the flow for:
+        #num packets, payload size,... TBD
+        ##self.total_stats[0,0
+        
+        #5tuple Details about the flow
+        #srcipaddr,dstipaddr,srcport,dstport,proto
+        self.tuple5 = []
 
     def reset(self):
         self.npack_inbound = 0
@@ -119,7 +139,9 @@ class Flow(object):
         self.npack_avgsize_out = 0
         self.time_first = (0,0);
         self.time_last = (0,0);
+        self.size_payload_sample = 0
         self.tdelta_sample = 0
+        self.bps_sample = 0
         self.nreset+=1
     
     def getNpack_inbound(self):

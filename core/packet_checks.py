@@ -75,30 +75,36 @@ def packet_payload_avgsize_check(f,p):
             f.npack_avgsize_in=((p.pktlength+f.npack_avgsize_in)/f.npack_payload_in)
         else:
             f.npack_avgsize_out=((p.pktlength+f.npack_avgsize_out)/f.npack_payload_out)
+        #Since we are certain that the payload is > 0 we call the functions
+        #to count total size per sample/flow
+        flow_payload_size(f,p)
 
+#Calculates the total size for the sample and Flow
+def flow_payload_size(f,p):
+    f.size_payload_total+=p.pktlength
+    f.size_payload_sample+=p.pktlength
 
 def join_int_to_float(a,b):
     if b == 0:
         return a
     return a+b*10**-(floor(log10(b))+1)
 
-#prueba para mostrar segundos
 def packet_time(f,p):
     """
     This function takes the time of the first and the 
     last packet in the sample and calculates the time.
     With this then we can obtain the bps ratio
-
+    
     print 'time1 :' + str(p.timestamp[0])
     print 'time2 :' + str(p.timestamp[1])
     """
     #Sum of total inbound/outbound packets
-    if f.getNpack is 0:
+    if f.getNpack() is 1:
         #Grab the time of first packet
         epoch = p.timestamp[0]
         delta_epoch = p.timestamp[1]
         f.time_first = (epoch,delta_epoch)
-    elif f.getNpack is const.N_SAMPLES:
+    elif f.getNpack() is const.N_SAMPLES:
         #Grab the time of last packet
         epoch = p.timestamp[0]
         delta_epoch = p.timestamp[1]
@@ -112,17 +118,27 @@ def packet_time(f,p):
             seconds_diff-=1
         #Now we join both int into a float
         f.tdelta_sample=join_int_to_float(seconds_diff,useconds_diff)
+        #print '1st t packet: ' + str(f.time_last[0])
+        #print '2nd t packet: ' + str(f.time_first[0])
+        #print f.tdelta_sample
+        
+        #Since now we have the time and payload we obtain bps
+        flow_bps(f,p)
+
+def flow_bps(f,p):
+    #We calculate the bps per packet
+    f.bps_sample=((f.size_payload_sample/8)/f.tdelta_sample)
 
 def update_flow(f,p):
     """@brief Input parameter is the flow object
     """
     #Check packet direction and increase its counter
     packet_direction_count(f,p)
+    #Check if packet has payload (originally this was the last func called)
+    packet_payload_check(f,p)
     #Check packet time
     packet_time(f,p)
     #Check packet size and increase its counter
     packet_size_small(f,p)
     packet_size_med(f,p)
     packet_size_large(f,p)
-    #Check if packet has payload
-    packet_payload_check(f,p)
