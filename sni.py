@@ -36,11 +36,16 @@ from cityhash import CityHash64
 #Constants definition
 const.IP_PROTO = 0x08
 const.ETHER_HEAD_LENGTH = 14
+#constants for inbound/outbound mapping (traffic direction)
 const.INBOUND = 0
 const.OUTBOUND = 1
+#Number of traffic packets required to create a sample
 const.N_SAMPLES = 6
-#Classification attemps default value (3) (custom value may be given by param)
-const.N_CLASSIF_ATTEMPTS = 3
+#Number of samples required to classify a flow (custom value may be given by param)
+const.N_CLASSIF_ATTEMPTS = 6
+#definition of default category for unknown/uncategorized traffic
+const.DEFAULT_CATEGORY = 99
+
 #Debug variables ones
 debug_showdata = False
 #########################
@@ -240,15 +245,18 @@ def learning(f):
             dataset_print_arff(f)
         f.reset()
 
-def check_flow_classification(f,prediction):
+def check_flow_classification(f):
     """
     This function verifies if an existing flow has been already classified
     and therefore the rest of the flow should not be re-classificated in 
     order to improve performance. Bear in mind that an initial
     misclassification may lead to the whole flow to be wrongly evaluated
     """
-    global classification_attempts
+    #global classification_attempts
     if f.protocol[1]>=classification_attempts:
+        #Obtain the most common classification value for this protocol
+        prediction = most_common_list(f.predictions)
+        #Now we just retrieve the classified protocol in text format
         for proto,keymap in supported_protocols.iteritems():
             if prediction == keymap:
                 f.protocol[0]=proto
@@ -262,8 +270,7 @@ def inspect_flow(f):
     if f.protocol[0] is 'default':
         flow_npack = f.getNpack()
         if flow_npack % const.N_SAMPLES == 0:
-            #By checking nreset value we ignore the first 15 packets of each new
-            #flow
+            #By checking nreset value we ignore the first sample of each new flow
             if f.nreset >= 1:
                 global model
                 sample = [[(f.npack_small) , (f.npack_small_in) , (f.npack_small_out) ,\
@@ -281,9 +288,13 @@ def inspect_flow(f):
                 #probability = model.predict_proba(sample)
                 #print 'Probability of protocol :' + str(prediction)
                 
+                #Add up the prediction for this sample. Once the limit of
+                #samples (classification_attemps) is reached then the most
+                #common value in the array will be the category of the flow
+                f.predictions.append(int(prediction))
                 #Increase the classification counter for this flow
                 f.protocol[1]+=1
-                check_flow_classification(f,prediction)
+                check_flow_classification(f)
             f.reset()
 
 #Inspect packet to find out if new connection or existing based on 5tuple
