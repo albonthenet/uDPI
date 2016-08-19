@@ -38,7 +38,7 @@ const.IP_PROTO = 0x08
 const.ETHER_HEAD_LENGTH = 14
 const.INBOUND = 0
 const.OUTBOUND = 1
-const.N_SAMPLES = 15
+const.N_SAMPLES = 6
 #Classification attemps default value (3) (custom value may be given by param)
 const.N_CLASSIF_ATTEMPTS = 3
 #Debug variables ones
@@ -54,7 +54,6 @@ macaddr = None
 
 #global variable for sckit-learn object
 model = None
-model2 = None
 #One of the variables simply boolean to learn active
 #Othe indicates if active the type of protocol to learn
 learn_protocol_on = False
@@ -73,7 +72,19 @@ supported_protocols = {'whatsapp':1,\
     'skype':5,\
     'http-web':6,\
     'bittorrent':7,\
-    'android-background':8}
+    'android-background':8,\
+    'youtube':10,\
+    'default':99}
+supported_protocols_revr = {1:'whatsapp',\
+    2:'ssh',\
+    3:'ftp',\
+    4:'spotify',\
+    5:'skype',\
+    6:'http-web',\
+    7:'bittorrent',\
+    8:'android-background',\
+    9:'youtube',\
+    99:'default'}
 
 
 def ip_class(ipclass_in):
@@ -145,14 +156,19 @@ def signal_handler(signal, frame):
     #We do some pre-sorting by values for better representation
     sorted_flows = {}
     for k,v in flows.iteritems():
-        print "Connection ID: " + str(k) + ' : ' + str(v.protocol[0])
+        #print "Connection ID: " + str(k) + ' : ' + str(v.protocol[0])
         sorted_flows.update({k:str(v.protocol[0])})
-    
-    print '\n\nPrinting sorted...\n\n'
+    print '##########################'
+    print '\n\nClassified connections:\n\n'
     #Here we do some preprocessing converting this new dict to a list
     sorted_flows = sorted(sorted_flows.items(), key=operator.itemgetter(1))
     for k in range(len(sorted_flows)):
-        print "Connection ID: " + str(sorted_flows[k][0]) + ' : ' +sorted_flows[k][1]
+        connId=sorted_flows[k][0]
+        protocol = sorted_flows[k][1]
+        #protocol = supported_protocols_revr[protocol]
+        print "Connection ID: " + str(connId) + ' : '+ str(protocol) +\
+        ' (src ip: '+ str(flows[connId].tuple5[0]) + ', dstip: ' + str(flows[connId].tuple5[1]) +')'+\
+        ' bytes: ' + str(flows[connId].size_payload_total)
     
     """
     for k,v in flows.iteritems():
@@ -191,12 +207,6 @@ def eth_addr (a) :
     b = "%.2x:%.2x:%.2x:%.2x:%.2x:%.2x" % (ord(a[0]) , ord(a[1]) , ord(a[2]), ord(a[3]), ord(a[4]) , ord(a[5]))
     return b
 
-def create_dataset():
-    """
-    This function will create a data set given by an input data 
-    in form of features and the provided target class
-    """
-
 def dataset_print_arff(f):
     """
     This function simply creates a file with a new line using a similar ARFF
@@ -209,8 +219,9 @@ def dataset_print_arff(f):
     str(f.npack_inbound) + ',' + str(f.npack_outbound) + ',' +\
     str(f.npack_payload) + ',' + str(f.npack_payload_in) + ',' +str(f.npack_payload_out) + ',' +\
     str(f.npack_avgsize) + ',' + str(f.npack_avgsize_in) + ',' + str(f.npack_avgsize_out) + ',' +\
-    str(f.tdelta_sample)+ ',' +\
     str(learn_protocol_type) + '\n'
+    #str(f.tdelta_sample)+ ',' +\
+    #str(learn_protocol_type) + '\n'
     print dataset_line
 
     #Open file descriptor for writing or appending new line to dataset
@@ -255,24 +266,20 @@ def inspect_flow(f):
             #flow
             if f.nreset >= 1:
                 global model
-                global model2
                 sample = [[(f.npack_small) , (f.npack_small_in) , (f.npack_small_out) ,\
                 (f.npack_med) , (f.npack_med_in) , (f.npack_med_out) ,\
                 (f.npack_large) , (f.npack_large_in) , (f.npack_large_out) ,\
                 (f.npack_inbound) , (f.npack_outbound) ,\
                 (f.npack_payload) , (f.npack_payload_in) ,(f.npack_payload_out) ,\
-                (f.npack_avgsize) , (f.npack_avgsize_in) , (f.npack_avgsize_out) ,\
-                (f.tdelta_sample)]]
-                print 'Sample_input: ' + str(sample)
+                (f.npack_avgsize) , (f.npack_avgsize_in) ,(f.npack_avgsize_out)]]\
+                #(f.tdelta_sample)]]
+                print 'Sample_input: ' + str(sample) + ' bps: ' + str(f.bps_sample)
                 prediction = model.predict(sample)
-                print 'Predicition of protocol :' + str(prediction)
-                prediction2 = model2.predict(sample)
-                print 'Predicition2 of protocol :' + str(prediction2)
+                pred_str = supported_protocols_revr[int(prediction)]
+                print 'Prediction of protocol :' + str(pred_str)
 
-                probability = model.predict_proba(sample)
-                print 'Probability of protocol :' + str(prediction)
-                probability = model2.predict_proba(sample)
-                print 'Probability2 of protocol :' + str(prediction2)
+                #probability = model.predict_proba(sample)
+                #print 'Probability of protocol :' + str(prediction)
                 
                 #Increase the classification counter for this flow
                 f.protocol[1]+=1
@@ -322,7 +329,7 @@ def inspect_packet(p):
         update_flow(flow,p)
         flows.update({connId : flow})
         #Adding 5tuple info to the flow
-        #add_5tuple_info(f,p)
+        add_5tuple_info(flows[connId],p)
         print "New connection established. ConnId: %i" % (connId)
         return True
     
@@ -522,17 +529,14 @@ def main(argv):
         print "Detecting protocols: " #TBD show list of currently supported
         #TBD to check possible exceptions, file not found, etc
         global model
-        global model2
         dataset_path = options.dataset_load
         data = np.genfromtxt(dataset_path, skip_header=True, delimiter=',')
         model = DecisionTreeClassifier()
-        model2 = LogisticRegression(C=1.0, dual=False, fit_intercept=True,intercept_scaling=1,penalty='l2', tol=0.0001)
         #get number of attributes in selected dataset
         num_attributes = getNumAttributes(dataset_path)
         features = data[:, :num_attributes]
         targets = data[:, num_attributes]
         model.fit(features,targets)
-        model2.fit(features, targets)
     else:
         print 'Invalid arguments. Either you need to learn or detect'
         parser.print_help()

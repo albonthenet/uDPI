@@ -117,7 +117,7 @@ class Flow(object):
         
         #5tuple Details about the flow
         #srcipaddr,dstipaddr,srcport,dstport,proto
-        self.tuple5 = []
+        self.tuple5 = [None,None,None,None]
 
     def reset(self):
         self.npack_inbound = 0

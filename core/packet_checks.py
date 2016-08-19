@@ -127,7 +127,12 @@ def packet_time(f,p):
 
 def flow_bps(f,p):
     #We calculate the bps per packet
-    f.bps_sample=((f.size_payload_sample/8)/f.tdelta_sample)
+    #TBD add exception for: ZeroDivisionError: integer division or modulo by
+    #zero
+    try:
+        f.bps_sample=((f.size_payload_sample/8)/f.tdelta_sample)
+    except ZeroDivisionError:
+        print "Divide by zero error in tdelta sampling"
 
 def update_flow(f,p):
     """@brief Input parameter is the flow object
