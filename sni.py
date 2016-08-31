@@ -40,12 +40,14 @@ const.ETHER_HEAD_LENGTH = 14
 const.INBOUND = 0
 const.OUTBOUND = 1
 #Number of traffic packets required to create a sample
-const.N_SAMPLES = 6
+const.N_SAMPLES = 15
 #Number of samples required to classify a flow (custom value may be given by param)
-const.N_CLASSIF_ATTEMPTS = 6
+const.N_CLASSIF_ATTEMPTS = 4
 #definition of default category for unknown/uncategorized traffic
 const.DEFAULT_CATEGORY = 99
-
+#This constant defines how many samples are taken for category when learning a
+#protocol. When this number is reached the program exists
+const.MAX_SAMPLES_CATEGORY = 150
 #Debug variables ones
 debug_showdata = False
 #########################
@@ -57,6 +59,10 @@ connNum = 0
 flows = {}
 macaddr = None
 
+#Accumulator for line counting when creating dataset
+lines_to_dataset = 0
+#Filename for dataset write
+dataset_file = None
 #global variable for sckit-learn object
 model = None
 #One of the variables simply boolean to learn active
@@ -69,28 +75,20 @@ classification_attempts = const.N_CLASSIF_ATTEMPTS
 #Number of attributes in the current dataset (based on CSV files)
 num_attributes = None
 #Dictionary with supported protocol - matched value for dataset
-#supported_protocol = {1:'whatsapp', 2:'ssh', 3:'ftp', 4:'spotify'}
 supported_protocols = {'whatsapp':1,\
     'ssh':2,\
     'ftp':3,\
-    'spotify':4,\
-    'skype':5,\
-    'http-web':6,\
-    'bittorrent':7,\
-    'android-background':8,\
-    'youtube':10,\
+    'bittorrent':4,\
+    'tor-browser':5,\
+    'skype':6,\
     'default':99}
 supported_protocols_revr = {1:'whatsapp',\
     2:'ssh',\
     3:'ftp',\
-    4:'spotify',\
-    5:'skype',\
-    6:'http-web',\
-    7:'bittorrent',\
-    8:'android-background',\
-    9:'youtube',\
+    4:'bittorrent',\
+    5:'tor-browser',\
+    6:'skype',\
     99:'default'}
-
 
 def ip_class(ipclass_in):
     if ipclass_in == 1:
@@ -158,22 +156,35 @@ def signal_handler(signal, frame):
     print
     print 'ProgramFlows captured info:'
     #global flows
+    #Just a local counter for summing up the number of flows classified when
+    #displaying results
+    flows_local_counter = 0
     #We do some pre-sorting by values for better representation
     sorted_flows = {}
     for k,v in flows.iteritems():
         #print "Connection ID: " + str(k) + ' : ' + str(v.protocol[0])
         sorted_flows.update({k:str(v.protocol[0])})
-    print '##########################'
-    print '\n\nClassified connections:\n\n'
+    print '#############################'
+    print '## Classified connections: ##'
+    print '#############################\n\n'
     #Here we do some preprocessing converting this new dict to a list
     sorted_flows = sorted(sorted_flows.items(), key=operator.itemgetter(1))
     for k in range(len(sorted_flows)):
         connId=sorted_flows[k][0]
         protocol = sorted_flows[k][1]
         #protocol = supported_protocols_revr[protocol]
-        print "Connection ID: " + str(connId) + ' : '+ str(protocol) +\
-        ' (src ip: '+ str(flows[connId].tuple5[0]) + ', dstip: ' + str(flows[connId].tuple5[1]) +')'+\
-        ' bytes: ' + str(flows[connId].size_payload_total)
+        #Use 4500 bytes as good reference
+        if (flows[connId].size_payload_total) > 400:
+            print "Connection ID: " + str(connId) + ' :\t'+ str(protocol) +\
+            ' (srcIP: '+ str(flows[connId].tuple5[0]) + ', dstIP: ' + str(flows[connId].tuple5[1]) +')'+\
+            '\tbytes: ' + str(flows[connId].size_payload_total)
+            flows_local_counter+=1
+        """
+        else:
+            print "(low size) Connection ID: " + str(connId) + ' :\t'+ str(protocol) +\
+            ' (srcIP: '+ str(flows[connId].tuple5[0]) + ', dstIP: ' + str(flows[connId].tuple5[1]) +')'+\
+            '\tbytes: ' + str(flows[connId].size_payload_total)
+        """
     
     """
     for k,v in flows.iteritems():
@@ -205,6 +216,7 @@ def signal_handler(signal, frame):
             print 'Timestamp: %s' % (v[i].getTimestamp())
             print 'Length: %d' % (v[i].getPktlength())
     """
+    print 'Total number of flows shown: ' + str(flows_local_counter)
     sys.exit(0)
 
 #Convert a string of 6 characters of ethernet address into a dash separated hex string
@@ -230,7 +242,8 @@ def dataset_print_arff(f):
     print dataset_line
 
     #Open file descriptor for writing or appending new line to dataset
-    file_descriptor = open_dataset(learn_protocol_type)
+    #file_descriptor = open_dataset(learn_protocol_type)
+    file_descriptor = open_dataset(dataset_file)
     file_descriptor.write(dataset_line)
     file_descriptor.close()
 
@@ -243,6 +256,11 @@ def learning(f):
         #flow
         if f.nreset >= 1:
             dataset_print_arff(f)
+            global lines_to_dataset
+            lines_to_dataset+=1
+            if lines_to_dataset == const.MAX_SAMPLES_CATEGORY:
+                print 'Lines limit per application reached.. exiting'
+                exit()
         f.reset()
 
 def check_flow_classification(f):
@@ -402,6 +420,8 @@ def parse_packet(packet, ptimestamp) :
 
         if debug_showdata:
             print 'Version : ' + str(version) + ' IP Header Length : ' + str(ihl) + ' TTL : ' + str(ttl) + ' Protocol : ' + str(protocol) + ' Source Address : ' + str(s_addr) + ' Destination Address : ' + str(d_addr)
+        #global count variable to check number of total packets.. for debugg
+        global count
 
         #TCP protocol
         if protocol == socket.IPPROTO_TCP :
@@ -434,7 +454,7 @@ def parse_packet(packet, ptimestamp) :
             #|G|K|H|T|N|N|
             #+-+-+-+-+-+-+
             # 3 1 8 4 2 1
-            global count
+            #global count
             count+=1
             #Construction of packet object
             p = types.Packet(s_addr,d_addr,s_port,d_port,protocol,direction,ptimestamp,data_size,payload)
@@ -457,8 +477,8 @@ def parse_packet(packet, ptimestamp) :
             #now unpack them :)
             udph = unpack('!HHHH' , udp_header)
 
-            source_port = udph[0]
-            dest_port = udph[1]
+            s_port = udph[0]
+            d_port = udph[1]
             length = udph[2]
             checksum = udph[3]
             
@@ -469,9 +489,14 @@ def parse_packet(packet, ptimestamp) :
             data_size = len(packet) - h_size
 
             #Data layer
-            data = packet[h_size:]
+            payload = packet[h_size:]
             if debug_showdata:
                 print 'Data : ' + data
+            #global count
+            count+=1
+            #Construction of packet object
+            p = types.Packet(s_addr,d_addr,s_port,d_port,protocol,direction,ptimestamp,data_size,payload)
+            inspect_packet(p)
         
         #ICMP Packets
         elif protocol == 1 :
@@ -497,7 +522,7 @@ def parse_packet(packet, ptimestamp) :
                 print 'Data : ' + data
                 print 'Data hex: ' + ':'.join(x.encode('hex') for x in data)
 
-        #some other transport protocol like SCTP
+        #some other non-supported transport protocol like SCTP
         else :
             print 'Protocol other than TCP/UDP/ICMP'
 
@@ -520,6 +545,7 @@ def main(argv):
     #Parsing options stuff
     parser = OptionParser(usage="%prog [-l protocol-to-learn] [-d result]", version="%prog"+VERSION)
     parser.add_option("-l", "--learn", dest="learn_protocol",help="Create dataset for learning")
+    parser.add_option("-f", "--file", dest="file_learn",help="File for dataset storage")
     parser.add_option("-d", "--detect", dest="dataset_load",help="Start detection and write to an output file")
     parser.add_option("-a", "--attempts", dest="class_attempts", help="Number of classification attempts before a protocol is classified")
     (options, args) = parser.parse_args()
@@ -527,13 +553,20 @@ def main(argv):
     if options.learn_protocol and options.dataset_load:
         parser.error("ERROR: Not possible to learn and detect yet")
         exit()
-    elif options.learn_protocol:
+    elif options.learn_protocol and options.file_learn == None:
+        parser.error("If learning you must specify the file to write the \
+        dataset - Use option -f [file]")
+        exit()
+    elif options.learn_protocol and options.file_learn:
         global learn_protocol_type
         global learn_protocol_on
         learn_protocol_on = True
         #TBD check that protocol is supported...
         learn_protocol_type = supported_protocols[options.learn_protocol]
+        global dataset_file
+        dataset_file = options.file_learn
         print 'Learning for protocol: ' +str(options.learn_protocol)+' ('+str(learn_protocol_type)+')'
+        print 'File to create dataset: ' + str(options.file_learn)
     elif options.dataset_load:
         global detect_protocol_on
         detect_protocol_on = True
